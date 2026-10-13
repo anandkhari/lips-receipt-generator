@@ -1,4 +1,5 @@
-import puppeteer, { Browser, LaunchOptions } from 'puppeteer';
+import puppeteer, { Browser } from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 import React from 'react';
 import fs from 'fs';
 import { renderToStaticMarkup } from 'react-dom/server.edge';
@@ -9,9 +10,9 @@ export interface GeneratePdfOptions extends ReceiptTemplateProps {
 }
 
 /**
- * Searches for an existing Chrome or Edge installation on the host system.
+ * Searches for an existing Chrome or Edge installation on the host system (local development).
  */
-function findChromeExecutable(): string | undefined {
+function findLocalChromeExecutable(): string | undefined {
   if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(/*turbopackIgnore: true*/ process.env.PUPPETEER_EXECUTABLE_PATH)) {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
@@ -30,14 +31,14 @@ function findChromeExecutable(): string | undefined {
     `${localAppData}\\Google\\Chrome\\Application\\chrome.exe`,
     `${programFiles}\\Microsoft\\Edge\\Application\\msedge.exe`,
     `${programFilesX86}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    // Standard Linux paths (containers / cloud)
+    // Standard macOS paths
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    // Standard local Linux paths (if developer runs on desktop Ubuntu/Fedora)
     '/usr/bin/google-chrome',
     '/usr/bin/google-chrome-stable',
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
-    // Standard macOS paths
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
   ];
 
   for (const p of potentialPaths) {
@@ -55,12 +56,30 @@ function findChromeExecutable(): string | undefined {
 
 /**
  * Launch Chromium browser instance.
- * Automatically checks for system Chrome/Edge or falls back to Puppeteer cache.
+ * In Vercel serverless production (Linux), uses @sparticuz/chromium with puppeteer-core.
+ * In local development (Windows / macOS), uses local Chrome or Edge with puppeteer-core.
  */
 export async function launchBrowser(): Promise<Browser> {
-  const executablePath = findChromeExecutable();
+  const isServerless = Boolean(
+    process.env.VERCEL ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    (process.platform === 'linux' && !findLocalChromeExecutable())
+  );
 
-  const options: LaunchOptions = {
+  if (isServerless) {
+    const executablePath = await chromium.executablePath();
+    return await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: { width: 794, height: 1123 },
+      executablePath,
+      headless: true,
+    });
+  }
+
+  // Local development (Windows / macOS / local desktop)
+  const localExecutable = findLocalChromeExecutable();
+
+  return await puppeteer.launch({
     headless: true,
     args: [
       '--no-sandbox',
@@ -69,13 +88,8 @@ export async function launchBrowser(): Promise<Browser> {
       '--disable-gpu',
       '--font-render-hinting=medium',
     ],
-  };
-
-  if (executablePath) {
-    options.executablePath = executablePath;
-  }
-
-  return await puppeteer.launch(options);
+    executablePath: localExecutable,
+  });
 }
 
 /**

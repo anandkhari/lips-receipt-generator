@@ -4,6 +4,7 @@ import { Student, Payment, ReceiptType } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 function generateReceiptFilename(receiptNumber?: string, studentName?: string): string {
   const cleanStudent = (studentName || 'STUDENT')
