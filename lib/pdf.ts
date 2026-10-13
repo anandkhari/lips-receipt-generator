@@ -1,5 +1,6 @@
-import puppeteer, { Browser } from 'puppeteer';
+import puppeteer, { Browser, LaunchOptions } from 'puppeteer';
 import React from 'react';
+import fs from 'fs';
 import { renderToStaticMarkup } from 'react-dom/server.edge';
 import ReceiptTemplate, { ReceiptTemplateProps } from '@/components/receipt/ReceiptTemplate';
 
@@ -8,11 +9,58 @@ export interface GeneratePdfOptions extends ReceiptTemplateProps {
 }
 
 /**
+ * Searches for an existing Chrome or Edge installation on the host system.
+ */
+function findChromeExecutable(): string | undefined {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(/*turbopackIgnore: true*/ process.env.PUPPETEER_EXECUTABLE_PATH)) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  if (process.env.CHROME_BIN && fs.existsSync(/*turbopackIgnore: true*/ process.env.CHROME_BIN)) {
+    return process.env.CHROME_BIN;
+  }
+
+  const localAppData = process.env.LOCALAPPDATA || '';
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+
+  const potentialPaths = [
+    // Standard Windows Chrome / Edge paths
+    `${programFiles}\\Google\\Chrome\\Application\\chrome.exe`,
+    `${programFilesX86}\\Google\\Chrome\\Application\\chrome.exe`,
+    `${localAppData}\\Google\\Chrome\\Application\\chrome.exe`,
+    `${programFiles}\\Microsoft\\Edge\\Application\\msedge.exe`,
+    `${programFilesX86}\\Microsoft\\Edge\\Application\\msedge.exe`,
+    // Standard Linux paths (containers / cloud)
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    // Standard macOS paths
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  ];
+
+  for (const p of potentialPaths) {
+    try {
+      if (p && fs.existsSync(/*turbopackIgnore: true*/ p)) {
+        return p;
+      }
+    } catch {
+      // ignore path access errors
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Launch Chromium browser instance.
- * Abstracted to easily support other Puppeteer runtimes (e.g. serverless) if needed.
+ * Automatically checks for system Chrome/Edge or falls back to Puppeteer cache.
  */
 export async function launchBrowser(): Promise<Browser> {
-  return await puppeteer.launch({
+  const executablePath = findChromeExecutable();
+
+  const options: LaunchOptions = {
     headless: true,
     args: [
       '--no-sandbox',
@@ -21,7 +69,13 @@ export async function launchBrowser(): Promise<Browser> {
       '--disable-gpu',
       '--font-render-hinting=medium',
     ],
-  });
+  };
+
+  if (executablePath) {
+    options.executablePath = executablePath;
+  }
+
+  return await puppeteer.launch(options);
 }
 
 /**
